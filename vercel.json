@@ -1,0 +1,8 @@
+{
+  "crons": [
+    { "path": "/api/cron/plan",    "schedule": "0 6 * * 1" },
+    { "path": "/api/cron/generate","schedule": "0 7 * * *" },
+    { "path": "/api/cron/harvest", "schedule": "0 * * * *" },
+    { "path": "/api/cron/learn",   "schedule": "0 9 * * 1" }
+  ]
+}
