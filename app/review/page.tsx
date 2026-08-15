@@ -13,7 +13,7 @@ export default async function Review() {
 
   return (
     <main className="wrap wide">
-      <nav className="top-nav"><a href="/review">Review</a><a href="/post-queue">Post Queue</a><a href="/gallery">Gallery</a><a href="/brand-settings">Brand Settings</a></nav>
+      <nav className="top-nav"><a href="/review">Review</a><a href="/post-queue">Post Queue</a><a href="/gallery">Gallery</a><a href="/brand-settings">Brand Settings</a><a href="/lora">LoRA</a></nav>
       <header className="masthead">
         <span className="mark">APEX Engine</span>
         <span className="pending">{posts?.length ?? 0} awaiting</span>

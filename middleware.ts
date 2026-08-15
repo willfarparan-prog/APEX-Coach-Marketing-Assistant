@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Every page and API route except the cron jobs and the fal webhook is
- * unauthenticated otherwise — anyone with the URL could wipe reference
- * photos or approve posts. Cron routes and the fal webhook stay excluded
- * here because they already carry their own bearer/token check.
+ * Every page and API route except the cron jobs and the fal/lora webhooks
+ * is unauthenticated otherwise — anyone with the URL could wipe reference
+ * photos or approve posts. Cron routes and the webhooks stay excluded here
+ * because they already carry their own bearer/token check, and fal.ai's
+ * servers can't satisfy a Basic Auth challenge anyway.
  *
  * Fails OPEN (no gate) if ADMIN_USER/ADMIN_PASSWORD aren't set, so a missing
  * env var doesn't lock out the owner before they've configured it — but that
@@ -28,5 +29,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/cron|api/fal/webhook|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/cron|api/fal/webhook|api/lora/webhook|_next/static|_next/image|favicon.ico).*)"],
 };

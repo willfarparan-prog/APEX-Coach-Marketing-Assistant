@@ -91,13 +91,16 @@ Spread post_type roughly evenly across pillars.`,
  * Plain text-to-image endpoints silently ignore it. That is why the presence of
  * reference images forces the composite (edit) route.
  *
- * PHASE 3 (LoRA): insert a branch ABOVE the hasReferenceImages check —
- *   if an active LoRA exists for this variant, route to ROUTE.lora and pass
- *   the trained weight URL. Reference images then become the fallback.
+ * PHASE 3 (LoRA): an active, ready LoRA for this variant routes ABOVE the
+ * hasReferenceImages check. Reference images become the fallback for
+ * variants without a trained LoRA yet. The actual weight URL + scale are
+ * resolved fresh at generation time (see generate.ts's activeLoraByVariant),
+ * not stored here -- only the route name is.
  */
-function pickModel(c: Constitution, idea: any, hasReferenceImages: boolean) {
+function pickModel(c: Constitution, idea: any, hasReferenceImages: boolean, hasActiveLora: boolean) {
   const wantsText = !!c.text_rendering?.in_frame_text;
   if (idea.format === "reel") return ROUTE.motion;
+  if (hasActiveLora) return ROUTE.lora;
   if (hasReferenceImages) return ROUTE.composite;
   if (wantsText && idea.overlay_text) return ROUTE.hero;
   if (c.subject_law?.faces_allowed) return ROUTE.hero;
@@ -119,10 +122,20 @@ async function referenceCounts(): Promise<Record<Variant, number>> {
   return counts;
 }
 
+async function activeLoraVariants(): Promise<Record<Variant, boolean>> {
+  const { data } = await db.from("lora_models").select("variant").eq("is_active", true).eq("status", "ready");
+  const active: Record<Variant, boolean> = { dark: false, light: false };
+  for (const r of (data ?? []) as any[]) {
+    const v = r.variant as Variant;
+    if (v === "dark" || v === "light") active[v] = true;
+  }
+  return active;
+}
+
 export async function scheduleWeek(constitutions: Record<Variant, Constitution>, pillars: any[]) {
   const c = constitutions.dark;
   const cycle: string[] = c.grid_rhythm.cycle;
-  const refCounts = await referenceCounts();
+  const [refCounts, activeLora] = await Promise.all([referenceCounts(), activeLoraVariants()]);
 
   const { data: lastPost } = await db.from("posts")
     .select("post_type, grid_index").order("slot_at", { ascending: false }).limit(1).maybeSingle();
@@ -165,7 +178,7 @@ export async function scheduleWeek(constitutions: Record<Variant, Constitution>,
     const { data: post, error } = await db.from("posts").insert({
       idea_id: idea.id, pillar: pillar.code, post_type: idea.post_type, format: idea.format,
       grid_index: gridIndex, slot_at: slotAt.toISOString(), seed: pillar.seed,
-      model: pickModel(cv, idea, refCounts[variant] > 0), variant, caption_final: idea.caption,
+      model: pickModel(cv, idea, refCounts[variant] > 0, activeLora[variant]), variant, caption_final: idea.caption,
       feature_vector: {
         pillar: pillar.code, hook_archetype: idea.hook_archetype, subject_class: idea.subject_class,
         post_type: idea.post_type, format: idea.format, cta_type: idea.cta_type, variant,
@@ -185,7 +198,7 @@ export async function scheduleWeek(constitutions: Record<Variant, Constitution>,
 export async function scheduleOnDemand(constitutions: Record<Variant, Constitution>, pillars: any[], count: number) {
   const c = constitutions.dark;
   const cycle: string[] = c.grid_rhythm.cycle;
-  const refCounts = await referenceCounts();
+  const [refCounts, activeLora] = await Promise.all([referenceCounts(), activeLoraVariants()]);
   const { data: lastPost } = await db.from("posts")
     .select("post_type, grid_index").order("slot_at", { ascending: false }).limit(1).maybeSingle();
   let gridIndex = (lastPost?.grid_index ?? -1) + 1;
@@ -220,7 +233,7 @@ export async function scheduleOnDemand(constitutions: Record<Variant, Constituti
     const { data: post, error } = await db.from("posts").insert({
       idea_id: idea.id, pillar: pillar.code, post_type: idea.post_type, format: idea.format,
       grid_index: gridIndex, slot_at: slotAt.toISOString(), seed: pillar.seed,
-      model: pickModel(cv, idea, refCounts[variant] > 0), variant, caption_final: idea.caption,
+      model: pickModel(cv, idea, refCounts[variant] > 0, activeLora[variant]), variant, caption_final: idea.caption,
       feature_vector: {
         pillar: pillar.code, hook_archetype: idea.hook_archetype, subject_class: idea.subject_class,
         post_type: idea.post_type, format: idea.format, cta_type: idea.cta_type, variant,
