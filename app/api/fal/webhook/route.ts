@@ -1,15 +1,19 @@
-import { db, loadConstitution } from "@/lib/core";
+import { db, loadConstitution, archiveImage, type Variant } from "@/lib/core";
 import { critique } from "@/lib/critic";
 
 export const maxDuration = 120;
 
 /**
- * fal calls this when a frame is ready. The critic runs HERE — nothing reaches
- * your approval queue without passing the constitution first.
+ * fal.ai calls this when a generation completes. Archives the image to Supabase
+ * Storage, runs the critic, and routes the post to review or retry.
+ *
+ * Note the catch block: if the critic itself errors, the frame is passed
+ * through to human review rather than lost. A critic outage should not silently
+ * discard generated work.
  */
 export async function POST(req: Request) {
   const url = new URL(req.url);
-  if (url.searchParams.get("token") !== process.env.CRON_SECRET)
+  if (url.searchParams.get("token") !== (process.env.CRON_SECRET ?? "").trim())
     return new Response("no", { status: 401 });
 
   const postId = url.searchParams.get("post")!;
@@ -19,32 +23,44 @@ export async function POST(req: Request) {
   const imageUrl = body?.payload?.images?.[0]?.url;
   if (body.status === "ERROR" || !imageUrl) {
     await db.from("posts").update({ status: "critique_failed" }).eq("id", postId);
-    return Response.json({ ok: false });
+    return Response.json({ ok: false, reason: "no image in payload" });
   }
 
-  const c = await loadConstitution();
-  const { data: post } = await db.from("posts")
-    .select("id, attempts, idea:ideas(subject_prompt, overlay_text)").eq("id", postId).single();
+  const archivedUrl = await archiveImage(imageUrl, `${postId}/attempt-${attempt}-${Date.now()}.jpg`);
 
-  const result = await critique({
-    imageUrl,
-    intendedSubject: (post as any)?.idea?.subject_prompt ?? "",
-    constitution: c,
-  });
+  try {
+    const { data: post } = await db.from("posts")
+      .select("id, attempts, variant, idea:ideas(subject_prompt, overlay_text)").eq("id", postId).maybeSingle();
 
-  await db.from("generations").update({
-    image_url: imageUrl,
-    critic_scores: result.scores,
-    critic_verdict: result.verdict,
-    critic_notes: [result.notes, result.prompt_patch].filter(Boolean).join(" | "),
-  }).eq("post_id", postId).eq("attempt", attempt);
+    const variant = ((post as any)?.variant as Variant) ?? "dark";
+    const c = await loadConstitution(variant);
 
-  if (result.verdict === "pass") {
-    await db.from("posts")
-      .update({ status: "awaiting_approval", backplate_url: imageUrl }).eq("id", postId);
-  } else {
-    // back to the generate queue with the failure logged; it will re-roll with a new seed
-    await db.from("posts").update({ status: "critique_failed" }).eq("id", postId);
+    const result = await critique({
+      imageUrl,
+      intendedSubject: (post as any)?.idea?.subject_prompt ?? "",
+      constitution: c,
+    });
+
+    await db.from("generations").update({
+      image_url: imageUrl,
+      archived_url: archivedUrl,
+      critic_scores: result.scores,
+      critic_verdict: result.verdict,
+      critic_notes: [result.notes, result.prompt_patch].filter(Boolean).join(" | "),
+    }).eq("post_id", postId).eq("attempt", attempt);
+
+    if (result.verdict === "pass") {
+      await db.from("posts").update({ status: "awaiting_approval", backplate_url: imageUrl }).eq("id", postId);
+    } else {
+      await db.from("posts").update({ status: "critique_failed" }).eq("id", postId);
+    }
+    return Response.json({ ok: true, verdict: result.verdict, archived: !!archivedUrl, variant });
+  } catch (e: any) {
+    await db.from("generations").update({
+      image_url: imageUrl, archived_url: archivedUrl,
+      critic_notes: "critic error: " + String(e?.message ?? e),
+    }).eq("post_id", postId).eq("attempt", attempt);
+    await db.from("posts").update({ status: "awaiting_approval", backplate_url: imageUrl }).eq("id", postId);
+    return Response.json({ ok: true, verdict: "critic_error_passed_through", archived: !!archivedUrl });
   }
-  return Response.json({ ok: true, verdict: result.verdict });
 }

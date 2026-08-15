@@ -1,7 +1,5 @@
 import { db } from "@/lib/core";
 
-/** One tap from the review screen. A rejection reason is optional but it is the
- *  highest-signal data in the system — it is human judgement the critic missed. */
 export async function POST(req: Request) {
   const { id, decision, note, caption } = await req.json();
   if (!["approved", "rejected"].includes(decision))
@@ -13,9 +11,10 @@ export async function POST(req: Request) {
 
   await db.from("posts").update(patch).eq("id", id);
 
-  // Rejected frames go back for another roll rather than being dropped.
+  // A declined post goes back for another attempt (up to 4) and its note
+  // becomes training signal via humanTastePatches().
   if (decision === "rejected") {
-    const { data: p } = await db.from("posts").select("attempts").eq("id", id).single();
+    const { data: p } = await db.from("posts").select("attempts").eq("id", id).maybeSingle();
     if ((p?.attempts ?? 0) < 4) await db.from("posts").update({ status: "critique_failed" }).eq("id", id);
   }
   return Response.json({ ok: true });
