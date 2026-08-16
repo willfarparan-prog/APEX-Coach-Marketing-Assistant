@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function Review() {
   const { data: posts } = await db
     .from("posts")
-    .select("id, pillar, post_type, format, slot_at, variant, backplate_url, caption_final, idea:ideas(overlay_text, hook_archetype, metric_cards, annotation_callouts, eyebrow_text), generations(critic_scores, attempt)")
+    .select("id, pillar, post_type, format, slot_at, variant, backplate_url, caption_final, idea:ideas(overlay_text, hook_archetype, metric_cards, annotation_callouts, eyebrow_text)")
     .eq("status", "awaiting_approval")
     .order("slot_at");
 

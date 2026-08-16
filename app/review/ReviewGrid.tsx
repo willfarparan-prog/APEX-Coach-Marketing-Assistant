@@ -17,12 +17,7 @@ type Post = {
     metric_cards?: MetricCard[] | null; annotation_callouts?: AnnotationCallout[] | null;
     eyebrow_text?: string | null;
   } | null;
-  generations?: { critic_scores: any; attempt: number }[];
 };
-
-function latestScores(p: Post) {
-  return p.generations?.sort((a, b) => b.attempt - a.attempt)[0]?.critic_scores ?? {};
-}
 
 /** Composited overlay — never AI-generated. */
 function MetricRow({ cards }: { cards?: MetricCard[] | null }) {
@@ -110,7 +105,7 @@ export default function ReviewGrid({ posts }: { posts: Post[] }) {
     return (
       <div className="empty">
         <h2>Nothing to review.</h2>
-        <p>Frames appear here once they pass the critic.</p>
+        <p>Frames appear here as soon as they're generated.</p>
       </div>
     );
   }
@@ -155,24 +150,6 @@ export default function ReviewGrid({ posts }: { posts: Post[] }) {
                 <span className="tag">{selected.variant ?? "dark"}</span>
                 <span className="tag">{selected.idea?.hook_archetype}</span>
               </div>
-
-              {/* Score bars render blank when critic_scores is null — see the
-                  known-bug note in the handoff doc. */}
-              <dl className="scorecard">
-                {(() => {
-                  const s = latestScores(selected);
-                  return (
-                    <>
-                      <div className="score">
-                        <dt>Shadow</dt>
-                        <div className="bar"><span style={{ width: `${(s.shadow_ratio ?? 0) * 100}%` }} /></div>
-                        <dd>{s.shadow_ratio != null ? `${Math.round(s.shadow_ratio * 100)}%` : "—"}</dd>
-                      </div>
-                      <div className="score"><dt>Ember</dt><dd>{s.ember_accent_present ? "present" : "missing"}</dd></div>
-                    </>
-                  );
-                })()}
-              </dl>
 
               <label className="field-label" htmlFor="caption-edit">Caption</label>
               <textarea

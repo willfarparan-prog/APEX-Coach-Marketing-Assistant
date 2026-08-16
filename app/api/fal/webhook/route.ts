@@ -1,15 +1,13 @@
-import { db, loadConstitution, archiveImage, type Variant } from "@/lib/core";
-import { critique } from "@/lib/critic";
+import { db, archiveImage } from "@/lib/core";
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 /**
- * fal.ai calls this when a generation completes. Archives the image to Supabase
- * Storage, runs the critic, and routes the post to review or retry.
- *
- * Note the catch block: if the critic itself errors, the frame is passed
- * through to human review rather than lost. A critic outage should not silently
- * discard generated work.
+ * fal.ai calls this when a generation completes. Archives the image to
+ * Supabase Storage and sends it straight to human review -- no automated
+ * critic gate. "critique_failed" as a status name predates that removal;
+ * it now only means "fal.ai itself errored or returned no image," which
+ * cron/generate retries up to MAX_ATTEMPTS same as before.
  */
 export async function POST(req: Request) {
   const url = new URL(req.url);
@@ -28,39 +26,11 @@ export async function POST(req: Request) {
 
   const archivedUrl = await archiveImage(imageUrl, `${postId}/attempt-${attempt}-${Date.now()}.jpg`);
 
-  try {
-    const { data: post } = await db.from("posts")
-      .select("id, attempts, variant, idea:ideas(subject_prompt, overlay_text)").eq("id", postId).maybeSingle();
+  await db.from("generations").update({
+    image_url: imageUrl, archived_url: archivedUrl,
+  }).eq("post_id", postId).eq("attempt", attempt);
 
-    const variant = ((post as any)?.variant as Variant) ?? "dark";
-    const c = await loadConstitution(variant);
+  await db.from("posts").update({ status: "awaiting_approval", backplate_url: imageUrl }).eq("id", postId);
 
-    const result = await critique({
-      imageUrl,
-      intendedSubject: (post as any)?.idea?.subject_prompt ?? "",
-      constitution: c,
-    });
-
-    await db.from("generations").update({
-      image_url: imageUrl,
-      archived_url: archivedUrl,
-      critic_scores: result.scores,
-      critic_verdict: result.verdict,
-      critic_notes: [result.notes, result.prompt_patch].filter(Boolean).join(" | "),
-    }).eq("post_id", postId).eq("attempt", attempt);
-
-    if (result.verdict === "pass") {
-      await db.from("posts").update({ status: "awaiting_approval", backplate_url: imageUrl }).eq("id", postId);
-    } else {
-      await db.from("posts").update({ status: "critique_failed" }).eq("id", postId);
-    }
-    return Response.json({ ok: true, verdict: result.verdict, archived: !!archivedUrl, variant });
-  } catch (e: any) {
-    await db.from("generations").update({
-      image_url: imageUrl, archived_url: archivedUrl,
-      critic_notes: "critic error: " + String(e?.message ?? e),
-    }).eq("post_id", postId).eq("attempt", attempt);
-    await db.from("posts").update({ status: "awaiting_approval", backplate_url: imageUrl }).eq("id", postId);
-    return Response.json({ ok: true, verdict: "critic_error_passed_through", archived: !!archivedUrl });
-  }
+  return Response.json({ ok: true, archived: !!archivedUrl });
 }

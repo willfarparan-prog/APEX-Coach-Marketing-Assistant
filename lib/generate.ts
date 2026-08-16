@@ -1,5 +1,5 @@
 import { db, assemblePrompt, loadConstitutions, type Variant } from "./core";
-import { learnedPromptPatches, humanTastePatches } from "./critic";
+import { humanTastePatches } from "./critic";
 import { submitImage, estimateCost, ROUTE } from "./providers/fal";
 
 type ActiveLora = { weight_url: string; scale: number; trigger_token: string };
@@ -35,10 +35,9 @@ export async function generateForPosts(postIds: string[]) {
   if (!postIds.length) return { fired: 0, errors: [], patches_in_use: 0 };
 
   const constitutions = await loadConstitutions();
-  const [critiquePatches, humanPatches, refs, loraByVariant] = await Promise.all([
-    learnedPromptPatches(), humanTastePatches(), referenceUrlsByVariant(), activeLoraByVariant(),
+  const [patches, refs, loraByVariant] = await Promise.all([
+    humanTastePatches(), referenceUrlsByVariant(), activeLoraByVariant(),
   ]);
-  const patches = [...critiquePatches, ...humanPatches];
 
   const { data: rows } = await db.from("posts")
     .select("id, seed, model, attempts, variant, idea:ideas(subject_prompt, overlay_text)")

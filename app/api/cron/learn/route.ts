@@ -13,9 +13,10 @@ export const dynamic = "force-dynamic";
  * expected, not a bug.
  *
  * Do not lower thresholds to "make it work" — without real engagement data
- * there is nothing to learn from. The feedback loops that DO function today are
- * humanTastePatches() and learnedPromptPatches() in lib/critic.ts, which run off
- * your own decline reasons and critic failures.
+ * there is nothing to learn from. The feedback loop that DOES function today
+ * is humanTastePatches() in lib/critic.ts, which runs off your own decline
+ * reasons. (The automated critic — and the critic-score-derived features this
+ * cron used to mine below — was removed; see lib/critic.ts.)
  */
 
 const MIN_OBSERVATIONS = 5;
@@ -35,7 +36,7 @@ export async function GET(req: Request) {
 
 async function buildObservations() {
   const { data: posts } = await db.from("posts")
-    .select("id, published_at, feature_vector, backplate_url, metrics(hours_since_publish, saves, shares, reach), generations(image_url, critic_scores)")
+    .select("id, published_at, feature_vector, backplate_url, metrics(hours_since_publish, saves, shares, reach)")
     .eq("status", "published").not("published_at", "is", null);
   if (!posts?.length) return 0;
 
@@ -66,23 +67,6 @@ async function buildObservations() {
           post_id: g.id, feature, level: String(level), week_start: wk,
           z_saves: zs(g.m.saves ?? 0), z_shares: zh(g.m.shares ?? 0), z_reach: zr(g.m.reach ?? 0),
         });
-
-      // Critic scores become learnable features — this is why the null
-      // critic_scores bug matters: it silently drops these rows.
-      const shipped = g.generations?.find((gen: any) => gen.image_url === g.backplate_url && gen.critic_scores);
-      const s = shipped?.critic_scores;
-      if (s) {
-        const extra: Record<string, string> = {};
-        if (typeof s.shadow_ratio === "number")
-          extra.shadow_bucket = s.shadow_ratio < 0.55 ? "low" : s.shadow_ratio < 0.7 ? "mid" : "high";
-        if (s.ember_accent_present != null)
-          extra.ember_accent_present = s.ember_accent_present ? "yes" : "no";
-        for (const [feature, level] of Object.entries(extra))
-          rows.push({
-            post_id: g.id, feature, level, week_start: wk,
-            z_saves: zs(g.m.saves ?? 0), z_shares: zh(g.m.shares ?? 0), z_reach: zr(g.m.reach ?? 0),
-          });
-      }
     }
   }
   if (!rows.length) return 0;
